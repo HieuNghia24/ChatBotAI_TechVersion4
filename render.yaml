@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: chatbox-support
+    env: docker
+    plan: free
+    autoDeploy: true
+    dockerfilePath: ./Dockerfile

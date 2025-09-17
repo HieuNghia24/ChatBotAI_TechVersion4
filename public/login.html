@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Login</title>
+</head>
+<body>
+  <h2>Đăng nhập</h2>
+  <form onsubmit="return checkLogin()">
+    <input type="text" id="username" placeholder="Username" required><br>
+    <input type="password" id="password" placeholder="Password" required><br>
+    <button type="submit">Login</button>
+  </form>
+
+  <script>
+    function checkLogin() {
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+
+      // Kiểm tra đơn giản — bạn có thể thay bằng gọi API về backend để xác thực thật
+      if (username === "admin" && password === "123456") {
+        // Lưu trạng thái login vào localStorage
+        localStorage.setItem("loggedIn", "true");
+        window.location.href = "/index.html"; // Chuyển sang trang chatbot
+      } else {
+        alert("Sai username hoặc password!");
+      }
+      return false;
+    }
+  </script>
+</body>
+</html>
