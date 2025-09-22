@@ -1,85 +1,95 @@
-import express from "express";
-import path from "path";
-import { fileURLToPath } from "url";
-import xlsx from "xlsx";
-import fs from "fs";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const express = require("express");
+const xlsx = require("xlsx");
+const bodyParser = require("body-parser");
+const cors = require("cors");
+const stringSimilarity = require("string-similarity");
+const unorm = require("unorm");
 
 const app = express();
-const PORT = process.env.PORT || 10000;
+const PORT = 10000;
 
-app.use(express.json());
-app.use(express.static(path.join(__dirname, "public")));
+app.use(bodyParser.json());
+app.use(cors());
+app.use(express.static("public"));
 
-// Load FAQ safely
-let faqs = [];
-function loadFaq(){
-  try{
-    const filePath = path.join(__dirname, "faq.xlsx");
-    if (!fs.existsSync(filePath)) {
-      console.warn("faq.xlsx not found at", filePath);
-      faqs = [];
-      return;
-    }
-    const wb = xlsx.readFile(filePath);
-    const sheet = wb.Sheets[wb.SheetNames[0]];
-    faqs = xlsx.utils.sheet_to_json(sheet);
-    console.log(`✅ Loaded ${faqs.length} FAQ rows from ${filePath}`);
-  }catch(err){
-    console.error("Error loading faq.xlsx:", err.message);
-    faqs = [];
+// Chuẩn hóa chuỗi (không phân biệt hoa/thường, có dấu/không dấu)
+function normalizeText(str) {
+  return unorm
+    .nfd(str.toLowerCase())
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+// Load FAQ từ Excel
+let faq = [];
+function loadFAQ() {
+  try {
+    const workbook = xlsx.readFile("faq.xlsx");
+    const sheetName = workbook.SheetNames[0];
+    const sheet = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
+    faq = sheet
+      .map((row) => ({
+        question: String(row.question || row.Question || "").trim(),
+        answer: String(row.answer || row.Answer || "").trim(),
+      }))
+      .filter((q) => q.question && q.answer);
+    console.log(`✅ Loaded ${faq.length} FAQ items`);
+  } catch (err) {
+    console.error("❌ Error reading faq.xlsx:", err);
   }
 }
-loadFaq();
+loadFAQ();
 
-app.get("/ping", (req,res) => res.json({ok:true}));
+// API: Gợi ý (chứa từ khóa)
+app.get("/api/suggest", (req, res) => {
+  const q = normalizeText(req.query.q || "");
+  if (!q) return res.json([]);
+  const results = faq
+    .filter((item) => normalizeText(item.question).includes(q))
+    .slice(0, 5)
+    .map((item) => item.question);
+  res.json(results);
+});
 
-// POST /api/ask - find best match (contains)
+// API: Hỏi đáp (Fuzzy Search)
 app.post("/api/ask", (req, res) => {
-  const question = (req.body?.question || "").toString().trim().toLowerCase();
-  if(!question) return res.json({ answer: "Vui lòng nhập câu hỏi." });
+  const { question } = req.body;
+  if (!question) return res.json({ answer: "Xin lỗi, tôi chưa hiểu câu hỏi." });
 
-  // Exact contains match on 'question' column (case-insensitive)
-  let answer = null;
-  for (const row of faqs) {
-    if (!row.question) continue;
-    try {
-      const q = row.question.toString().toLowerCase();
-      if (question.includes(q) || q.includes(question)) {
-        answer = row.answer || "";
-        break;
-      }
-    } catch(e){ continue; }
+  const q = normalizeText(question);
+
+  let bestMatch = null;
+  let bestScore = 0;
+  faq.forEach((item) => {
+    const score = stringSimilarity.compareTwoStrings(
+      q,
+      normalizeText(item.question)
+    );
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = item;
+    }
+  });
+
+  const threshold = 0.7; // 70% match coi là đúng
+  if (bestMatch && bestScore >= threshold) {
+    res.json({ answer: bestMatch.answer });
+  } else {
+    const suggestions = faq
+      .map((item) => ({
+        question: item.question,
+        score: stringSimilarity.compareTwoStrings(
+          q,
+          normalizeText(item.question)
+        ),
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5)
+      .map((r) => r.question);
+    res.json({ answer: null, suggestions });
   }
-
-  if (!answer) answer = "Xin lỗi, tôi chưa có câu trả lời phù hợp.";
-
-  return res.json({ answer });
-});
-
-// reload endpoint
-app.get("/api/reload-faq", (req,res)=>{
-  loadFaq();
-  res.json({ok:true, count: faqs.length});
-});
-
-// serve index
-
-
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running at http://localhost:${PORT}`);
 });
-
-
-
-
-
-
-
-
