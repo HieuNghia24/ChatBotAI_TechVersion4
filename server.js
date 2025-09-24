@@ -30,7 +30,7 @@ app.post("/login", (req, res) => {
   const { username, password } = req.body || {};
 
   // TODO: đổi credential này theo yêu cầu của bạn hoặc kết nối DB sau này
-  const validUser = username === "admin" && password === "123456";
+  const validUser = username === "admin" && password === "Vft@123";
 
   if (validUser) {
     req.session.user = { username }; // lưu session đơn giản
