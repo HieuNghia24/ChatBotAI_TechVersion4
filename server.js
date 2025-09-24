@@ -83,8 +83,8 @@ app.post("/api/ask", (req, res) => {
           normalizeText(item.question)
         ),
       }))
+      .filter((item) => item.score >= 0.3) // chỉ giữ lại câu hỏi có độ giống ≥ 30%
       .sort((a, b) => b.score - a.score)
-      
       .map((r) => r.question);
     res.json({ answer: null, suggestions });
   }
