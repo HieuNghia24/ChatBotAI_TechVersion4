@@ -4,34 +4,23 @@ const bodyParser = require("body-parser");
 const cors = require("cors");
 const stringSimilarity = require("string-similarity");
 const unorm = require("unorm");
-const session = require("express-session"); // Thêm session
+const session = require("express-session");
 
 const app = express();
 const PORT = 10000;
 
 app.use(bodyParser.json());
 app.use(cors());
-app.use(express.urlencoded({ extended: true })); // để đọc form login
 app.use(express.static("public"));
 
-// Cấu hình session
 app.use(
   session({
     secret: "mySecretKey", // đổi thành chuỗi bảo mật riêng
     resave: false,
     saveUninitialized: true,
-    cookie: { secure: false }, // Để true nếu deploy HTTPS
+    cookie: { secure: false }, // nếu deploy HTTPS thì để true
   })
 );
-
-// Middleware kiểm tra login
-function requireLogin(req, res, next) {
-  if (req.session && req.session.user) {
-    next(); // đã login
-  } else {
-    res.redirect("/login.html"); // chưa login -> về trang login
-  }
-}
 
 // Chuẩn hóa chuỗi (không phân biệt hoa/thường, có dấu/không dấu)
 function normalizeText(str) {
@@ -61,32 +50,43 @@ function loadFAQ() {
 }
 loadFAQ();
 
-// ---------------- LOGIN ----------------
+// Tạo Middle Ware kiểm tra đăng nhập
+function requireLogin(req, res, next) {
+  if (req.session && req.session.user) {
+    next(); // đã login -> cho đi tiếp
+  } else {
+    res.redirect("/login"); // chưa login -> quay về trang login
+  }
+}
+
+// Ràng buộc route chatbot
+app.get("/login", (req, res) => {
+  res.sendFile(__dirname + "/public/login.html");
+});
 
 // Xử lý POST login
 app.post("/login", (req, res) => {
   const { username, password } = req.body;
 
-  // Tài khoản mẫu (có thể thay bằng DB)
+  // kiểm tra tài khoản (có thể hardcode hoặc lấy DB)
   if (username === "admin" && password === "123456") {
-    req.session.user = username;
+    req.session.user = username; // lưu user vào session
     res.redirect("/"); // login thành công -> vào chatbot
   } else {
-    res.redirect("/login.html?error=1"); // login sai -> về login
+    res.redirect("/login?error=1"); // sai thì quay lại login
   }
 });
 
 // Logout
 app.get("/logout", (req, res) => {
   req.session.destroy(() => {
-    res.redirect("/login.html");
+    res.redirect("/login");
   });
 });
 
-// ---------------- CHATBOT ----------------
 
 // API: Gợi ý (chứa từ khóa)
-app.get("/api/suggest", requireLogin, (req, res) => {
+app.get("/api/suggest", (req, res) => {
   const q = normalizeText(req.query.q || "");
   if (!q) return res.json([]);
   const results = faq
@@ -97,7 +97,7 @@ app.get("/api/suggest", requireLogin, (req, res) => {
 });
 
 // API: Hỏi đáp (Fuzzy Search)
-app.post("/api/ask", requireLogin, (req, res) => {
+app.post("/api/ask", (req, res) => {
   const { question } = req.body;
   if (!question) return res.json({ answer: "Xin lỗi, tôi chưa hiểu câu hỏi." });
 
@@ -133,11 +133,6 @@ app.post("/api/ask", requireLogin, (req, res) => {
       .map((r) => r.question);
     res.json({ answer: null, suggestions });
   }
-});
-
-// Giao diện chatbot (chặn login)
-app.get("/", requireLogin, (req, res) => {
-  res.sendFile(__dirname + "/public/chat.html");
 });
 
 app.listen(PORT, () => {
