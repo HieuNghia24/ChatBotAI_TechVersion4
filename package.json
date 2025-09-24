@@ -5,7 +5,6 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "postinstall": "npm install express-session"
     "dev": "nodemon server.js"
   },
   "keywords": [
