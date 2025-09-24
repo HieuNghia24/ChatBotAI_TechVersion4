@@ -48,13 +48,15 @@ app.get("/logout", (req, res) => {
   });
 });
 
-// Bảo vệ truy cập index (chỉ redirect, KHÔNG can thiệp code index.html)
+// Bảo vệ truy cập index (xoá session ngay sau khi cho vào index.html)
 app.get(["/", "/index.html"], (req, res) => {
   if (req.session && req.session.user) {
-    // Nếu đã login, trả index.html (giữ nguyên file index.html trong public)
-    return res.sendFile(path.join(__dirname, "public", "index.html"));
+    const filePath = path.join(__dirname, "public", "index.html");
+    // 👉 Cho phép vào 1 lần, sau đó xoá session để lần sau phải login lại
+    req.session.destroy(() => {
+      return res.sendFile(filePath);
+    });
   } else {
-    // Nếu chưa login => redirect về trang login
     return res.redirect("/login.html");
   }
 });
