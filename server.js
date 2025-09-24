@@ -1,63 +1,114 @@
 const express = require("express");
-const session = require("express-session");
-const path = require("path");
 const xlsx = require("xlsx");
+const bodyParser = require("body-parser");
+const cors = require("cors");
 const stringSimilarity = require("string-similarity");
+const unorm = require("unorm");
+const session = require('express-session');
+
 
 const app = express();
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// Session setup
+// --- START: login session (THÊM, KHÔNG SỬA phần khác) ---
 app.use(
   session({
-    secret: "chatbot-secret",
+    secret: process.env.SESSION_SECRET || "chatbot-secret",
     resave: false,
-    saveUninitialized: true,
+    saveUninitialized: false,
+    cookie: { maxAge: 24 * 60 * 60 * 1000 } // 1 ngày
   })
 );
+// --- END: login session ---
 
-// Load FAQ từ file Excel
-const workbook = xlsx.readFile(path.join(__dirname, "faq.xlsx"));
-const sheetName = workbook.SheetNames[0];
-const sheet = workbook.Sheets[sheetName];
-const faq = xlsx.utils.sheet_to_json(sheet);
+const PORT = 10000;
 
-// Hàm chuẩn hóa text
-function normalizeText(text) {
-  return (text || "").toLowerCase().replace(/\s+/g, " ").trim();
-}
+app.use(bodyParser.json());
+app.use(cors());
 
-// Middleware kiểm tra login
-function requireLogin(req, res, next) {
-  if (req.session && req.session.user) {
-    next();
-  } else {
-    res.redirect("/login.html");
-  }
-}
-
-// API: login
+// --- START: routes cho Login (THÊM, KHÔNG SỬA phần khác) ---
 app.post("/login", (req, res) => {
-  const { username, password } = req.body;
+  const { username, password } = req.body || {};
 
-  // Demo: user/pass fix cứng
-  if (username === "admin" && password === "123456") {
-    req.session.user = username;
-    res.json({ success: true });
+  // TODO: đổi credential này theo yêu cầu của bạn hoặc kết nối DB sau này
+  const validUser = username === "admin" && password === "123456";
+
+  if (validUser) {
+    req.session.user = { username }; // lưu session đơn giản
+    return res.json({ success: true });
   } else {
-    res.json({ success: false });
+    return res.json({ success: false, message: "Sai username hoặc password" });
   }
 });
 
-// API: trả lời câu hỏi chính xác/ gần đúng
-app.get("/api/ask", (req, res) => {
+// Logout (truy cập GET để redirect về login)
+app.get("/logout", (req, res) => {
+  req.session.destroy((err) => {
+    // ignore err, redirect về login
+    return res.redirect("/login.html");
+  });
+});
+
+// Bảo vệ truy cập index (chỉ redirect, KHÔNG can thiệp code index.html)
+app.get(["/", "/index.html"], (req, res) => {
+  if (req.session && req.session.user) {
+    // Nếu đã login, trả index.html (giữ nguyên file index.html trong public)
+    return res.sendFile(path.join(__dirname, "public", "index.html"));
+  } else {
+    // Nếu chưa login => redirect về trang login
+    return res.redirect("/login.html");
+  }
+});
+// --- END: routes cho Login ---
+
+app.use(express.static("public"));
+
+// Chuẩn hóa chuỗi (không phân biệt hoa/thường, có dấu/không dấu)
+function normalizeText(str) {
+  return unorm
+    .nfd(str.toLowerCase())
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+// Load FAQ từ Excel
+let faq = [];
+function loadFAQ() {
+  try {
+    const workbook = xlsx.readFile("faq.xlsx");
+    const sheetName = workbook.SheetNames[0];
+    const sheet = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
+    faq = sheet
+      .map((row) => ({
+        question: String(row.question || row.Question || "").trim(),
+        answer: String(row.answer || row.Answer || "").trim(),
+      }))
+      .filter((q) => q.question && q.answer);
+    console.log(`✅ Loaded ${faq.length} FAQ items`);
+  } catch (err) {
+    console.error("❌ Error reading faq.xlsx:", err);
+  }
+}
+loadFAQ();
+
+// API: Gợi ý (chứa từ khóa)
+app.get("/api/suggest", (req, res) => {
   const q = normalizeText(req.query.q || "");
-  if (!q) return res.json({ answer: "Bạn chưa nhập câu hỏi." });
+  if (!q) return res.json([]);
+  const results = faq
+    .filter((item) => normalizeText(item.question).includes(q))
+    .slice(0, 5)
+    .map((item) => item.question);
+  res.json(results);
+});
+
+// API: Hỏi đáp (Fuzzy Search)
+app.post("/api/ask", (req, res) => {
+  const { question } = req.body;
+  if (!question) return res.json({ answer: "Xin lỗi, tôi chưa hiểu câu hỏi." });
+
+  const q = normalizeText(question);
 
   let bestMatch = null;
   let bestScore = 0;
-
   faq.forEach((item) => {
     const score = stringSimilarity.compareTwoStrings(
       q,
@@ -73,40 +124,21 @@ app.get("/api/ask", (req, res) => {
   if (bestMatch && bestScore >= threshold) {
     res.json({ answer: bestMatch.answer });
   } else {
-    res.json({ answer: "Xin lỗi, tôi chưa có câu trả lời phù hợp." });
+    const suggestions = faq
+      .map((item) => ({
+        question: item.question,
+        score: stringSimilarity.compareTwoStrings(
+          q,
+          normalizeText(item.question)
+        ),
+      }))
+      .filter((item) => item.score >= 0.3) // chỉ giữ lại câu hỏi có độ giống ≥ 30%
+      .sort((a, b) => b.score - a.score)
+      .map((r) => r.question);
+    res.json({ answer: null, suggestions });
   }
 });
 
-// API: gợi ý câu hỏi
-app.get("/api/suggest", (req, res) => {
-  const q = normalizeText(req.query.q || "");
-  if (!q) return res.json([]);
-  const results = faq
-    .map((item) => ({
-      question: item.question,
-      score: stringSimilarity.compareTwoStrings(
-        q,
-        normalizeText(item.question)
-      ),
-    }))
-    .filter((item) => item.score >= 0.3)
-    .sort((a, b) => b.score - a.score)
-    .map((item) => item.question);
-
-  res.json(results); // trả tất cả thay vì chỉ 5
+app.listen(PORT, () => {
+  console.log(`🚀 Server running at http://localhost:${PORT}`);
 });
-
-// Cho phép login.html truy cập không cần session
-app.use("/login.html", express.static(path.join(__dirname, "public", "login.html")));
-
-// Bảo vệ index.html
-app.get("/index.html", requireLogin, (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
-});
-
-// Các static file khác
-app.use(express.static(path.join(__dirname, "public")));
-
-// Start server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server chạy tại http://localhost:${PORT}`));
