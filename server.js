@@ -84,7 +84,7 @@ app.post("/api/ask", (req, res) => {
         ),
       }))
       .sort((a, b) => b.score - a.score)
-      .slice(0, 5)
+      
       .map((r) => r.question);
     res.json({ answer: null, suggestions });
   }
