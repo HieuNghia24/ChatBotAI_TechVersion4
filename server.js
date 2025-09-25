@@ -92,24 +92,46 @@ function loadFAQ() {
 }
 loadFAQ();
 
-// API: Gợi ý (chứa từ khóa)
+// API: Gợi ý (keyword matching, không giới hạn)
 app.get("/api/suggest", (req, res) => {
   const q = normalizeText(req.query.q || "");
   if (!q) return res.json([]);
+
+  const keywords = q.split(" "); // tách input thành từng từ
   const results = faq
-    .filter((item) => normalizeText(item.question).includes(q))
-    .slice(0, 5)
-    .map((item) => item.question);
+    .filter((item) => {
+      const questionNorm = normalizeText(item.question);
+      return keywords.some((kw) => questionNorm.includes(kw)); // ít nhất 1 từ khớp
+    })
+    .map((item) => item.question); // không giới hạn số lượng
+
   res.json(results);
 });
 
-// API: Hỏi đáp (Fuzzy Search)
+// API: Gợi ý (keyword matching, không giới hạn)
+app.get("/api/suggest", (req, res) => {
+  const q = normalizeText(req.query.q || "");
+  if (!q) return res.json([]);
+
+  const keywords = q.split(" "); // tách input thành từng từ
+  const results = faq
+    .filter((item) => {
+      const questionNorm = normalizeText(item.question);
+      return keywords.some((kw) => questionNorm.includes(kw)); // ít nhất 1 từ khớp
+    })
+    .map((item) => item.question); // không giới hạn số lượng
+
+  res.json(results);
+});
+
+// API: Hỏi đáp (Fuzzy Search + keyword fallback)
 app.post("/api/ask", (req, res) => {
   const { question } = req.body;
   if (!question) return res.json({ answer: "Xin lỗi, tôi chưa hiểu câu hỏi." });
 
   const q = normalizeText(question);
 
+  // --- Tìm best match theo độ tương đồng ---
   let bestMatch = null;
   let bestScore = 0;
   faq.forEach((item) => {
@@ -123,23 +145,21 @@ app.post("/api/ask", (req, res) => {
     }
   });
 
-  const threshold = 0.7; // 70% match coi là đúng
+  const threshold = 0.85; // 70% match coi là đúng
   if (bestMatch && bestScore >= threshold) {
-    res.json({ answer: bestMatch.answer });
-  } else {
-    const suggestions = faq
-      .map((item) => ({
-        question: item.question,
-        score: stringSimilarity.compareTwoStrings(
-          q,
-          normalizeText(item.question)
-        ),
-      }))
-      .filter((item) => item.score >= 0.3) // chỉ giữ lại câu hỏi có độ giống ≥ 30%
-      .sort((a, b) => b.score - a.score)
-      .map((r) => r.question);
-    res.json({ answer: null, suggestions });
+    return res.json({ answer: bestMatch.answer });
   }
+
+  // --- Nếu không đủ match, fallback sang keyword search ---
+  const keywords = q.split(" ");
+  const suggestions = faq
+    .filter((item) => {
+      const questionNorm = normalizeText(item.question);
+      return keywords.some((kw) => questionNorm.includes(kw));
+    })
+    .map((item) => item.question);
+
+  res.json({ answer: null, suggestions });
 });
 
 app.listen(PORT, () => {
