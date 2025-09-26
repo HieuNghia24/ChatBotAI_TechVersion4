@@ -108,21 +108,6 @@ app.get("/api/suggest", (req, res) => {
   res.json(results);
 });
 
-// API: Gợi ý (keyword matching, không giới hạn)
-app.get("/api/suggest", (req, res) => {
-  const q = normalizeText(req.query.q || "");
-  if (!q) return res.json([]);
-
-  const keywords = q.split(" "); // tách input thành từng từ
-  const results = faq
-    .filter((item) => {
-      const questionNorm = normalizeText(item.question);
-      return keywords.some((kw) => questionNorm.includes(kw)); // ít nhất 1 từ khớp
-    })
-    .map((item) => item.question); // không giới hạn số lượng
-
-  res.json(results);
-});
 
 // API: Hỏi đáp (Fuzzy Search + keyword fallback)
 app.post("/api/ask", (req, res) => {
